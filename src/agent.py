@@ -44,15 +44,20 @@ class AirlineAgent:
            - **Trip Type**: One-way or Round Trip?
            - **Dates**: Departure Date (and Return Date if Round Trip).
            - **Passengers**: 
-             - Number of Adults.
-             - Number of Children (ask for ages to categorize them as Children 2-11 or Infants <2).
+             - Number of Adults (Ages 12+).
+             - Number of Children (Ages 2-11).
+             - Number of Infants (Under 2).
            - **Class**: Economy, Business, etc. (Optional, default to Economy).
+           
+           *Note: If a user specifies a child's age as 12 or older, categorize them as an Adult for flight search purposes.*
+           
         3. **Collect Booking Details** (After selecting a flight):
            - **Passenger Names**: Full names for EACH passenger (must match the count).
            - **Contact Info**: Email or Phone (if needed for booking).
         4. **FINAL STEP**: Once you have the Flight choice (Number 1, 2, etc.), Passenger Names, and Email, call the `book_flight` tool.
            - Pass the `flight_index` as an integer (e.g., 1 for the first option).
            - The tool will return a **Booking Link**. Provide this link to the user to complete their purchase.
+           - **IMPORTANT**: creating a booking link will NOT pre-fill passenger names. You must tell the user they will need to enter names on the Google Flights page.
         
         **Process:**
         1. Ask clarifying questions until you have all Search Details.

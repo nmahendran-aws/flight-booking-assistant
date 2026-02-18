@@ -83,7 +83,34 @@ class SerpApiFlights:
 
             # Update Cache
             self.last_results = all_flights[:10] # Trace top 10
-            self.last_search_url = results.get("search_metadata", {}).get("google_flights_url", "https://www.google.com/travel/flights")
+            
+            # Capture the search URL and ensure passenger params are present
+            base_url = results.get("search_metadata", {}).get("google_flights_url", "https://www.google.com/travel/flights")
+            
+            # SerpApi sometimes provides a clean URL, but let's append our explicit params to be safe.
+            # Google Flights params: 
+            # num: Total passengers
+            # adults: Adult count
+            # children: Child count
+            # infants_in_seat: Infants in seat
+            # infants_on_lap: Infants on lap
+            
+            total_passengers = adults + children + infants_in_seat + infants_on_lap
+            param_suffix = f"&num={total_passengers}"
+            if adults > 1:
+                param_suffix += f"&adults={adults}"
+            if children > 0:
+                param_suffix += f"&children={children}"
+            if infants_in_seat > 0:
+                param_suffix += f"&infants_in_seat={infants_in_seat}"
+            if infants_on_lap > 0:
+                param_suffix += f"&infants_on_lap={infants_on_lap}"
+            
+            # Only append if not already in URL (simple check)
+            if "num=" not in base_url and total_passengers > 1:
+                self.last_search_url = base_url + param_suffix
+            else:
+                self.last_search_url = base_url
 
             flight_summary = []
             for i, flight in enumerate(all_flights[:5]): # Limit to top 5 for brevity
