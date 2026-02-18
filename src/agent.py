@@ -2,120 +2,146 @@ import os
 import sys
 import json
 from dotenv import load_dotenv
-from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage, AIMessage
-from langchain_core.tools import tool
-from src.browser import GoogleFlights
+import asyncio
+import os
+import sys
+from datetime import date
+from typing import Any, Optional
 
-# Load environment variables
-load_dotenv()
+from dotenv import load_dotenv
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage, BaseMessage
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.tools import StructuredTool
+
+# MCP Imports
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
 
 class AirlineAgent:
     def __init__(self):
-        # Initialize Google Flights browser wrapper
-        self.browser = GoogleFlights(headless=False)
+        load_dotenv()
+        self.llm = ChatOpenAI(model="gpt-4-turbo-preview", temperature=0)
+        self.messages: list[BaseMessage] = []
         
-        # Initialize LLM
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            print("Warning: OPENAI_API_KEY not found in environment variables.")
-        
-        self.llm = ChatOpenAI(temperature=0, model="gpt-4-turbo-preview")
-
-        # Define Tools as functions for binding
-        @tool
-        def search_flights(origin: str, destination: str, date: str):
-            """Search for flights given origin, destination, and date (YYYY-MM-DD)."""
-            return self.browser.search_flights(origin, destination, date)
-
-        @tool
-        def get_flight_results():
-            """Get the list of available flights after searching. Returns a list of flight options."""
-            return self.browser.get_flights()
-
-        @tool
-        def select_flight(index: int):
-            """Select a specific flight option by index (0-based)."""
-            return self.browser.select_flight(index)
-
-        self.tools = [search_flights, get_flight_results, select_flight]
-        self.tools_map = {t.name: t for t in self.tools}
-        
-        # Bind tools to LLM
-        self.llm_with_tools = self.llm.bind_tools(self.tools)
-        
-        from datetime import date
+        # System Prompt
         current_date = date.today()
-        
         self.system_message = SystemMessage(content=f"""You are a helpful airline booking assistant. 
-        You MUST use the provided 'search_flights' tool to find real flight information from Google Flights.
+        You have access to flight search tools via an MCP Server.
         
         The current date is {current_date}. 
         When the user mentions a date (e.g., "March 9th"), assume they mean the upcoming date relative to today.
         
         Rules:
-        1. If the user asks for flights, ALWAYS use the 'search_flights' tool first. Do not say you cannot browse.
-        2. Once you get results from 'search_flights', use 'get_flight_results' to extract the details.
-        3. Only after getting the results, present them to the user.
-        4. If the user selects a flight, use 'select_flight'.
+        1. If the user asks for flights, ALWAYS use the 'search_flights' tool.
+        2. Present the results clearly to the user.
         
         Do not make up information. Use the tools to get real data.
         """)
+        self.messages.append(self.system_message)
 
-        self.messages = [self.system_message]
+    async def run_loop(self, user_input: str):
+        """
+        Main async execution loop:
+        1. Connects to MCP Server (src/server.py)
+        2. Discovers tools
+        3. Runs LLM reasoning loop
+        """
+        # Define server parameters (launching src/server.py as subprocess)
+        server_script = os.path.join(os.path.dirname(__file__), "server.py")
+        
+        # Ensure we run with the same python executable
+        server_params = StdioServerParameters(
+            command=sys.executable,
+            args=[server_script],
+            env=os.environ.copy() # Pass env for API keys
+        )
 
-    def run(self, prompt: str):
-        """Runs the agent with the given prompt in a loop until a final answer is produced."""
-        try:
-            # Append user message
-            self.messages.append(HumanMessage(content=prompt))
-            
-            # Agent Loop
-            max_iterations = 5
-            for _ in range(max_iterations):
-                # 1. Invoke LLM
-                print("Invoking LLM...")
-                response = self.llm_with_tools.invoke(self.messages)
-                self.messages.append(response)
+        print(f"Connecting to MCP Server at: {server_script}...")
+        
+        # Connect to Server
+        async with stdio_client(server_params) as (read, write):
+            async with ClientSession(read, write) as session:
+                # Initialize session
+                await session.initialize()
                 
-                # Debug print
-                print(f"LLM Response type: {type(response)}")
-                print(f"Tool calls: {response.tool_calls}")
+                # List available tools from server
+                mcp_tools_list = await session.list_tools()
+                print(f"Connected. Found tools: {[t.name for t in mcp_tools_list.tools]}")
                 
-                # 2. Check for tool calls
-                if not response.tool_calls:
-                    # Final answer
-                    return response.content
+                # Convert MCP tools to LangChain tools
+                langchain_tools = []
+                for tool_info in mcp_tools_list.tools:
+                    # Create a closure to capture tool_name for the callback
+                    def create_tool_func(t_name):
+                        async def _tool_wrapper(**kwargs):
+                            # Call the tool via MCP session
+                            result = await session.call_tool(t_name, arguments=kwargs)
+                            # Result content is usually a list of TextContent or ImageContent
+                            # We extract text for the LLM
+                            text_output = []
+                            for content in result.content:
+                                if content.type == "text":
+                                    text_output.append(content.text)
+                            return "\n".join(text_output)
+                        return _tool_wrapper
+
+                    # Define the StructuredTool
+                    lc_tool = StructuredTool.from_function(
+                        func=None, # Async only
+                        coroutine=create_tool_func(tool_info.name),
+                        name=tool_info.name,
+                        description=tool_info.description or "No description",
+                    )
+                    langchain_tools.append(lc_tool)
+
+                # Bind tools to LLM
+                llm_with_tools = self.llm.bind_tools(langchain_tools)
                 
-                # 3. Execute tools
-                for tool_call in response.tool_calls:
-                    tool_name = tool_call["name"]
-                    tool_args = tool_call["args"]
-                    print(f"Executing tool: {tool_name} with args: {tool_args}")
+                # Add user input
+                self.messages.append(HumanMessage(content=user_input))
+                
+                # Execution Flow
+                final_response = None
+                max_iterations = 5
+                
+                for _ in range(max_iterations):
+                    print("Invoking LLM...")
+                    # Async invoke
+                    response = await llm_with_tools.ainvoke(self.messages)
+                    self.messages.append(response)
                     
-                    if tool_name in self.tools_map:
-                        tool_func = self.tools_map[tool_name]
-                        try:
-                            tool_result = tool_func.invoke(tool_args)
-                        except Exception as e:
-                            tool_result = f"Error: {str(e)}"
-                    else:
-                        tool_result = f"Error: Tool {tool_name} not found."
+                    if not response.tool_calls:
+                        final_response = response.content
+                        break
                     
-                    # Append tool result
-                    self.messages.append(ToolMessage(
-                        tool_call_id=tool_call["id"],
-                        name=tool_name,
-                        content=str(tool_result)
-                    ))
-            
-            return "Agent reached maximum iterations without final answer."
+                    # Execute Tools
+                    for tool_call in response.tool_calls:
+                        tool_name = tool_call['name']
+                        tool_args = tool_call['args']
+                        tool_id = tool_call['id']
+                        
+                        print(f"Executing tool: {tool_name} with args: {tool_args}")
+                        
+                        # Find the matching LangChain tool to execute its coroutine
+                        selected_tool = next((t for t in langchain_tools if t.name == tool_name), None)
+                        
+                        tool_output = "Error: Tool not found locally"
+                        if selected_tool:
+                            try:
+                                # Execute the async wrapper we defined above
+                                tool_output = await selected_tool.coroutine(**tool_args)
+                            except Exception as e:
+                                tool_output = f"Tool execution failed: {e}"
+                        
+                        # Append result
+                        self.messages.append(ToolMessage(
+                            content=str(tool_output),
+                            tool_call_id=tool_id
+                        ))
 
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            return f"An error occurred: {str(e)}"
+                return final_response
 
     def close(self):
-        """Closes the browser session."""
-        self.browser.stop()
+        """Cleanup if needed."""
+        pass

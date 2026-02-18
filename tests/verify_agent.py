@@ -6,8 +6,13 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.agent import AirlineAgent
 
+import asyncio
+
 def verify_agent():
-    print("Initializing Agent...")
+    pass # replaced by async main
+
+async def main():
+    print("Initializing Agent (Async MCP Client)...")
     try:
         agent = AirlineAgent()
         print("Agent initialized.")
@@ -15,7 +20,8 @@ def verify_agent():
         query = "Find me a flight from SFO to JFK on 2026-05-01"
         print(f"Running query: {query}")
         
-        response = agent.run(query)
+        # Await the async run loop
+        response = await agent.run_loop(query)
         print("Agent Response:")
         print(response)
         
@@ -27,4 +33,4 @@ def verify_agent():
         traceback.print_exc()
 
 if __name__ == "__main__":
-    verify_agent()
+    asyncio.run(main())

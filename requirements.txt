@@ -4,3 +4,5 @@ langchain-openai
 python-dotenv
 pydantic
 openai
+mcp
+google-search-results
