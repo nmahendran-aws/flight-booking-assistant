@@ -55,6 +55,17 @@ class AirlineAgent:
             # However, for the BindTools to work, we define it here.
             pass 
 
+        @tool
+        def book_flight(flight_id: str, passenger_names: str, email: str):
+            """
+            Book a selected flight.
+            args:
+                flight_id: The ID or description of the flight (e.g., "Flight 1: American Airlines...").
+                passenger_names: Comma-separated full names of all passengers.
+                email: Contact email address.
+            """
+            pass
+
         # We don't actually put this function in the list for the MCP execution path 
         # because the MCP list_tools() gives us the real schema.
         # But since we are creating the schema dynamically in run_loop, 
@@ -83,12 +94,14 @@ class AirlineAgent:
         3. **Collect Booking Details** (After selecting a flight):
            - **Passenger Names**: Full names for EACH passenger (must match the count).
            - **Contact Info**: Email or Phone (if needed for booking).
+        4. **FINAL STEP**: Once you have the Flight choice, Passenger Names, and Email, call the `book_flight` tool to confirm the booking.
         
         **Process:**
         1. Ask clarifying questions until you have all Search Details.
         2. Call `search_flights` with the specific parameters (count adults, children, etc. based on ages).
         3. Present results clearly.
-        4. If the user wants to book, ask for Passenger Names and other booking details.
+        4. If the user wants to book, ask for Passenger Names and Email.
+        5. Call `book_flight` with the collected details.
         
         Do not make up flight data. Use the tools.
         """)

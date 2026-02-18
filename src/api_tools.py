@@ -95,13 +95,26 @@ class SerpApiFlights:
             duration = flight_data.get("total_duration", "N/A")
             
             legs = flight_data.get("flights", [])
+            if not legs:
+                return f"{index + 1}. [No flight details available]"
+
+            # Times
+            first_leg = legs[0]
+            last_leg = legs[-1]
+            
+            dep_time = first_leg.get("departure_airport", {}).get("time", "N/A")
+            dep_airport = first_leg.get("departure_airport", {}).get("id", "")
+            
+            arr_time = last_leg.get("arrival_airport", {}).get("time", "N/A")
+            arr_airport = last_leg.get("arrival_airport", {}).get("id", "")
+            
+            
             airline_names = []
             for leg in legs:
                 airline_names.append(leg.get("airline", "Unknown Airline"))
             
             airline_str = ", ".join(list(set(airline_names)))
             
-            # Extensions often contain carbon info or stops summary
             extensions = flight_data.get("extensions", [])
             stops_info = "Nonstop"
             for ext in extensions:
@@ -110,20 +123,46 @@ class SerpApiFlights:
                      break
 
             carbon_emissions = flight_data.get("carbon_emissions", {}).get("this_flight", "N/A")
-            
-            # Booking Token (Deep Link)
+                
             booking_token = flight_data.get("booking_token", None)
             booking_link_msg = ""
             if booking_token:
-                # We can't easily construct the full URL without a second API call, 
-                # but we can simulate it or just mention it's bookable.
-                # For now, let's just indicate availability.
                 booking_link_msg = f"\n   - [Booking Token Available: {booking_token[:10]}...]"
 
             return (f"{index + 1}. **{airline_str}**\n"
                     f"   - Price: {price}\n"
+                    f"   - Departure: {dep_time} ({dep_airport})\n"
+                    f"   - Arrival: {arr_time} ({arr_airport})\n"
                     f"   - Duration: {duration}\n"
                     f"   - Stops: {stops_info}"
                     f"{booking_link_msg}")
         except Exception as e:
             return f"{index + 1}. [Error parsing flight details]"
+
+    def book_flight(self, flight_id: str, passenger_names: list[str], email: str) -> str:
+        """
+        Simulate booking a flight.
+        args:
+            flight_id: The ID or description of the flight to book.
+            passenger_names: List of full names for each passenger.
+            email: Contact email address.
+        """
+        import random
+        import string
+        
+        # Simulate processing time
+        print(f"Booking flight {flight_id} for {passenger_names} ({email})...")
+        
+        # Generate fake confirmation code
+        confirmation_code = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
+        
+        return f"""
+        # Booking Confirmed!
+        **Confirmation Code:** {confirmation_code}
+        
+        **Flight:** {flight_id}
+        **Passengers:** {", ".join(passenger_names)}
+        **Contact:** {email}
+        
+        *This is a mock booking. No card was charged.*
+        """

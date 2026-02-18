@@ -97,5 +97,16 @@ class TestSerpApiFlights(unittest.TestCase):
         self.assertIn("No flights found", result)
         print("\nTest Result (No Results Mock):\n" + result)
 
+    def test_book_flight(self):
+        result = self.flights.book_flight(
+            flight_id="Test Flight 123", 
+            passenger_names=["John Doe", "Jane Doe"], 
+            email="test@example.com"
+        )
+        self.assertIn("Booking Confirmed", result)
+        self.assertIn("Confirmation Code", result)
+        self.assertIn("John Doe", result)
+        print("\nTest Result (Booking):\n" + result)
+
 if __name__ == '__main__':
     unittest.main()

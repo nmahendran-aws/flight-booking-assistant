@@ -63,6 +63,27 @@ def search_flights(origin: str, destination: str, date_str: str,
         travel_class=travel_class
     )
 
+@mcp.tool()
+def book_flight(flight_id: str, passenger_names: str, email: str) -> str:
+    """
+    Book a selected flight.
+    
+    Args:
+        flight_id: The ID or description of the flight (e.g., "Flight 1: American Airlines...").
+        passenger_names: Comma-separated full names of all passengers.
+        email: Contact email address for the booking.
+    """
+    if not flight_tool:
+        return "Error: Server configuration missing SERPAPI_API_KEY."
+    
+    # Simple validation
+    if "@" not in email:
+        return "Error: Invalid email address."
+    
+    names_list = [n.strip() for n in passenger_names.split(",")]
+    
+    return flight_tool.book_flight(flight_id, names_list, email)
+
 if __name__ == "__main__":
     # Standard entry point for MCP
     mcp.run()
