@@ -14,7 +14,55 @@ class TestSerpApiFlights(unittest.TestCase):
         self.flights = SerpApiFlights(api_key="mock_key")
 
     @patch('src.api_tools.GoogleSearch')
-    def test_search_flights_success(self, MockGoogleSearch):
+    def test_search_flights_advanced(self, mock_google_search):
+        # Mock response
+        mock_search_instance = MagicMock()
+        mock_google_search.return_value = mock_search_instance
+        mock_search_instance.get_dict.return_value = {
+            "best_flights": [
+                {
+                    "flights": [{"airline": "TestAir"}],
+                    "price": "$200",
+                    "total_duration": "5h",
+                    "booking_token": "TOKEN123"
+                }
+            ]
+        }
+
+        # Call with advanced params
+        result = self.flights.search_flights(
+            origin="SFO", 
+            destination="JFK", 
+            date_str="2026-05-01",
+            return_date="2026-05-10",
+            adults=2,
+            children=1
+        )
+
+        # Verify GoogleSearch was called with correct params
+        expected_params = {
+            "engine": "google_flights",
+            "departure_id": "SFO",
+            "arrival_id": "JFK",
+            "outbound_date": "2026-05-01",
+            "return_date": "2026-05-10",
+            "currency": "USD",
+            "hl": "en",
+            "type": "1", # Round trip
+            "adults": 2,
+            "children": 1,
+            "infants_on_lap": 0,
+            "infants_in_seat": 0,
+            "travel_class": 1,
+            "api_key": "mock_key"
+        }
+        mock_google_search.assert_called_with(expected_params)
+        
+        # Verify parsing included the booking token
+        self.assertIn("Booking Token Available", result)
+
+    @patch('src.api_tools.GoogleSearch')
+    def test_search_flights_basic(self, MockGoogleSearch):
         # Mocking the JSON response from SerpApi
         mock_response = {
             "best_flights": [

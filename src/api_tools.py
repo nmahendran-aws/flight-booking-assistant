@@ -15,12 +15,32 @@ class SerpApiFlights:
              # Allow initialization without key for testing/mocking, but warn
              print("Warning: SERPAPI_API_KEY not found. Search will fail unless mocked.")
 
-    def search_flights(self, origin: str, destination: str, date_str: str) -> str:
+    def search_flights(self, origin: str, destination: str, date_str: str, 
+                      return_date: str = None, 
+                      adults: int = 1, 
+                      children: int = 0, 
+                      infants_on_lap: int = 0, 
+                      infants_in_seat: int = 0,
+                      travel_class: int = 1) -> str:
         """
-        Search for one-way flights using SerpApi.
-        Returns a JSON string summary of the best flights.
+        Search for flights using SerpApi.
+        args:
+            origin: 3-letter IATA code
+            destination: 3-letter IATA code
+            date_str: Departure date (YYYY-MM-DD)
+            return_date: Return date (YYYY-MM-DD). If provided, searches Round Trip.
+            adults: Number of adults (12+ years). Default 1.
+            children: Number of children (2-11 years). Default 0.
+            infants_on_lap: Number of infants on lap (under 2). Default 0.
+            infants_in_seat: Number of infants in seat (under 2). Default 0.
+            travel_class: 1=Economy, 2=Premium Eco, 3=Business, 4=First. Default 1 (Economy).
         """
-        print(f"Searching flights with SerpApi: {origin} -> {destination} on {date_str}")
+        trip_type = "2" # Default One-way
+        if return_date:
+            trip_type = "1" # Round Trip
+            print(f"Searching flights: {origin} -> {destination} ({date_str} to {return_date})")
+        else:
+            print(f"Searching flights: {origin} -> {destination} on {date_str}")
         
         if not self.api_key:
             return "Error: Missing SERPAPI_API_KEY."
@@ -32,9 +52,17 @@ class SerpApiFlights:
             "outbound_date": date_str,
             "currency": "USD",
             "hl": "en",
-            "type": "2", # One-way
+            "type": trip_type,
+            "adults": adults,
+            "children": children,
+            "infants_on_lap": infants_on_lap,
+            "infants_in_seat": infants_in_seat,
+            "travel_class": travel_class,
             "api_key": self.api_key
         }
+
+        if return_date:
+            params["return_date"] = return_date
 
         try:
             search = GoogleSearch(params)
@@ -52,7 +80,7 @@ class SerpApiFlights:
                 return "No flights found for this itinerary."
 
             flight_summary = []
-            for i, flight in enumerate(all_flights[:10]): # Limit to top 10
+            for i, flight in enumerate(all_flights[:5]): # Limit to top 5 for brevity
                 flight_summary.append(self._parse_flight(i, flight))
             
             return "\n".join(flight_summary)
@@ -83,10 +111,19 @@ class SerpApiFlights:
 
             carbon_emissions = flight_data.get("carbon_emissions", {}).get("this_flight", "N/A")
             
+            # Booking Token (Deep Link)
+            booking_token = flight_data.get("booking_token", None)
+            booking_link_msg = ""
+            if booking_token:
+                # We can't easily construct the full URL without a second API call, 
+                # but we can simulate it or just mention it's bookable.
+                # For now, let's just indicate availability.
+                booking_link_msg = f"\n   - [Booking Token Available: {booking_token[:10]}...]"
+
             return (f"{index + 1}. **{airline_str}**\n"
                     f"   - Price: {price}\n"
                     f"   - Duration: {duration}\n"
-                    f"   - Stops: {stops_info}\n"
-                    f"   - CO2: {carbon_emissions} g")
+                    f"   - Stops: {stops_info}"
+                    f"{booking_link_msg}")
         except Exception as e:
             return f"{index + 1}. [Error parsing flight details]"

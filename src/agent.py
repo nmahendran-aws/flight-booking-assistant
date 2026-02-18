@@ -13,6 +13,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage, BaseMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.tools import StructuredTool
+from langchain_core.tools import tool
 
 # MCP Imports
 from mcp import ClientSession, StdioServerParameters
@@ -24,19 +25,72 @@ class AirlineAgent:
         self.llm = ChatOpenAI(model="gpt-4-turbo-preview", temperature=0)
         self.messages: list[BaseMessage] = []
         
+        # Define Tools
+        @tool
+        def search_flights(origin: str, destination: str, date_str: str, 
+                         return_date: str = None, 
+                         adults: int = 1, 
+                         children: int = 0, 
+                         infants_on_lap: int = 0, 
+                         infants_in_seat: int = 0,
+                         travel_class: int = 1):
+            """
+            Search for flights using SerpApi (Google Flights).
+            Returns a summary of the best flight options.
+            args:
+                origin: 3-letter IATA code (e.g., 'SFO')
+                destination: 3-letter IATA code (e.g., 'JFK')
+                date_str: Departure date (YYYY-MM-DD)
+                return_date: Return date (YYYY-MM-DD) for Round Trip. Optional.
+                adults: Number of adults (12+). Default 1.
+                children: Number of children (2-11). Default 0.
+                infants_on_lap: Number of infants under 2 on lap. Default 0.
+                infants_in_seat: Number of infants under 2 in seat. Default 0.
+                travel_class: 1=Economy, 2=Premium Eco, 3=Business, 4=First. Default 1.
+            """
+            # This is just a schema definition for the LLM. 
+            # The actual execution happens via the MCP/IPC link, 
+            # so this function body is never actually executed locally by the agent logic 
+            # (which calls session.call_tool).
+            # However, for the BindTools to work, we define it here.
+            pass 
+
+        # We don't actually put this function in the list for the MCP execution path 
+        # because the MCP list_tools() gives us the real schema.
+        # But since we are creating the schema dynamically in run_loop, 
+        # we strictly need to update the SYSTEM PROMPT to know about these fields.
+        
+        # NOTE: The run_loop dynamically loads tools from server.py.
+        # `server.py` imports `api_tools.SerpApiFlights`.
+        # So we just need to ensure the System Prompt encourages using these fields.
+
         # System Prompt
         current_date = date.today()
         self.system_message = SystemMessage(content=f"""You are a helpful airline booking assistant. 
         You have access to flight search tools via an MCP Server.
         
         The current date is {current_date}. 
-        When the user mentions a date (e.g., "March 9th"), assume they mean the upcoming date relative to today.
         
-        Rules:
-        1. If the user asks for flights, ALWAYS use the 'search_flights' tool.
-        2. Present the results clearly to the user.
+        **CRITICAL RULES:**
+        1. **Do NOT make assumptions.** You must ask the user for specific details before searching.
+        2. **Collect the following Search Details:**
+           - **Trip Type**: One-way or Round Trip?
+           - **Dates**: Departure Date (and Return Date if Round Trip).
+           - **Passengers**: 
+             - Number of Adults.
+             - Number of Children (ask for ages to categorize them as Children 2-11 or Infants <2).
+           - **Class**: Economy, Business, etc. (Optional, default to Economy).
+        3. **Collect Booking Details** (After selecting a flight):
+           - **Passenger Names**: Full names for EACH passenger (must match the count).
+           - **Contact Info**: Email or Phone (if needed for booking).
         
-        Do not make up information. Use the tools to get real data.
+        **Process:**
+        1. Ask clarifying questions until you have all Search Details.
+        2. Call `search_flights` with the specific parameters (count adults, children, etc. based on ages).
+        3. Present results clearly.
+        4. If the user wants to book, ask for Passenger Names and other booking details.
+        
+        Do not make up flight data. Use the tools.
         """)
         self.messages.append(self.system_message)
 
