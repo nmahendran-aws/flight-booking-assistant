@@ -10,6 +10,8 @@ class SerpApiFlights:
     """
     def __init__(self, api_key: str = None):
         self.api_key = api_key or os.getenv("SERPAPI_API_KEY")
+        self.last_results = [] # Cache for last search results
+        self.last_search_url = "https://www.google.com/travel/flights" # Cache for the search URL
         # Initialize the client with the key
         if not self.api_key:
              # Allow initialization without key for testing/mocking, but warn
@@ -79,6 +81,10 @@ class SerpApiFlights:
             if not all_flights:
                 return "No flights found for this itinerary."
 
+            # Update Cache
+            self.last_results = all_flights[:10] # Trace top 10
+            self.last_search_url = results.get("search_metadata", {}).get("google_flights_url", "https://www.google.com/travel/flights")
+
             flight_summary = []
             for i, flight in enumerate(all_flights[:5]): # Limit to top 5 for brevity
                 flight_summary.append(self._parse_flight(i, flight))
@@ -86,6 +92,8 @@ class SerpApiFlights:
             return "\n".join(flight_summary)
 
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             return f"Failed to search flights: {str(e)}"
 
     def _parse_flight(self, index: int, flight_data: dict) -> str:
@@ -139,30 +147,42 @@ class SerpApiFlights:
         except Exception as e:
             return f"{index + 1}. [Error parsing flight details]"
 
-    def book_flight(self, flight_id: str, passenger_names: list[str], email: str) -> str:
+    def book_flight(self, flight_index: int, passenger_names: list[str], email: str) -> str:
         """
-        Simulate booking a flight.
+        Generates a booking link for the selected flight.
         args:
-            flight_id: The ID or description of the flight to book.
+            flight_index: The index of the flight (1-based) from the last search results.
             passenger_names: List of full names for each passenger.
             email: Contact email address.
         """
-        import random
-        import string
+        if not self.last_results:
+            return "Error: No search results found. Please search for flights first."
         
-        # Simulate processing time
-        print(f"Booking flight {flight_id} for {passenger_names} ({email})...")
-        
-        # Generate fake confirmation code
-        confirmation_code = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
-        
-        return f"""
-        # Booking Confirmed!
-        **Confirmation Code:** {confirmation_code}
-        
-        **Flight:** {flight_id}
-        **Passengers:** {", ".join(passenger_names)}
-        **Contact:** {email}
-        
-        *This is a mock booking. No card was charged.*
-        """
+        try:
+            # Convert 1-based index to 0-based
+            idx = int(flight_index) - 1
+            if idx < 0 or idx >= len(self.last_results):
+                return f"Error: Invalid flight index {flight_index}. Please select a number from the list."
+            
+            selected_flight = self.last_results[idx]
+            
+            # Use the captured search URL as the deep link to the results page
+            # This allows the user to click the exact flight they found
+            deep_link = self.last_search_url
+            
+            airline = selected_flight.get("flights", [{}])[0].get("airline", "Selected Airline")
+            price = selected_flight.get("price", "N/A")
+            
+            return f"""
+            # Booking Link Generated
+            
+            You selected: **{airline}** ({price})
+            
+            **Passengers:** {", ".join(passenger_names)}
+            **Contact:** {email}
+            
+            **[Click here to complete your booking on Google Flights]({deep_link})**
+            *(Note: This link takes you to the results page. Please select the flight matching {price})*
+            """
+        except Exception as e:
+            return f"Failed to generate booking link: {str(e)}"

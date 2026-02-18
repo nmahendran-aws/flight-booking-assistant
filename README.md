@@ -80,9 +80,14 @@ python3 src/server.py
 
 ## Changelog
 
-### v0.4.1 - Enhanced Result Formatting (Current)
+### v0.5.0 - Deep Link Handoff (Current)
+-   **Booking Links**: `book_flight` now returns a Google Flights URL for completion.
+-   **Persistent Session**: Agent now maintains state (flight cache) during a conversation.
+-   **Verification**: Updated `verify_booking.py` to check forvalid URLs.
+
+### v0.4.1 - Enhanced Result Formatting
 -   **Detailed Timestamps**: Search results now explicitly show Departure and Arrival dates/times.
--   **Airport Codes**: Added Origin/Destination airport codes to time details for clarity.
+-   **Airport Codes**: Added Origin/Destination airport codes to time details.
 
 ### v0.4.0 - Booking Logic
 -   **Added Mock Booking**: `book_flight` tool simulates transaction.

@@ -19,63 +19,19 @@ from langchain_core.tools import tool
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
+from contextlib import AsyncExitStack
+
 class AirlineAgent:
     def __init__(self):
         load_dotenv()
         self.llm = ChatOpenAI(model="gpt-4-turbo-preview", temperature=0)
         self.messages: list[BaseMessage] = []
+        self.exit_stack = AsyncExitStack()
+        self.session = None
+        self.langchain_tools = []
+        self.llm_with_tools = None
         
-        # Define Tools
-        @tool
-        def search_flights(origin: str, destination: str, date_str: str, 
-                         return_date: str = None, 
-                         adults: int = 1, 
-                         children: int = 0, 
-                         infants_on_lap: int = 0, 
-                         infants_in_seat: int = 0,
-                         travel_class: int = 1):
-            """
-            Search for flights using SerpApi (Google Flights).
-            Returns a summary of the best flight options.
-            args:
-                origin: 3-letter IATA code (e.g., 'SFO')
-                destination: 3-letter IATA code (e.g., 'JFK')
-                date_str: Departure date (YYYY-MM-DD)
-                return_date: Return date (YYYY-MM-DD) for Round Trip. Optional.
-                adults: Number of adults (12+). Default 1.
-                children: Number of children (2-11). Default 0.
-                infants_on_lap: Number of infants under 2 on lap. Default 0.
-                infants_in_seat: Number of infants under 2 in seat. Default 0.
-                travel_class: 1=Economy, 2=Premium Eco, 3=Business, 4=First. Default 1.
-            """
-            # This is just a schema definition for the LLM. 
-            # The actual execution happens via the MCP/IPC link, 
-            # so this function body is never actually executed locally by the agent logic 
-            # (which calls session.call_tool).
-            # However, for the BindTools to work, we define it here.
-            pass 
-
-        @tool
-        def book_flight(flight_id: str, passenger_names: str, email: str):
-            """
-            Book a selected flight.
-            args:
-                flight_id: The ID or description of the flight (e.g., "Flight 1: American Airlines...").
-                passenger_names: Comma-separated full names of all passengers.
-                email: Contact email address.
-            """
-            pass
-
-        # We don't actually put this function in the list for the MCP execution path 
-        # because the MCP list_tools() gives us the real schema.
-        # But since we are creating the schema dynamically in run_loop, 
-        # we strictly need to update the SYSTEM PROMPT to know about these fields.
-        
-        # NOTE: The run_loop dynamically loads tools from server.py.
-        # `server.py` imports `api_tools.SerpApiFlights`.
-        # So we just need to ensure the System Prompt encourages using these fields.
-
-        # System Prompt
+        # System Prompt logic (kept same)
         current_date = date.today()
         self.system_message = SystemMessage(content=f"""You are a helpful airline booking assistant. 
         You have access to flight search tools via an MCP Server.
@@ -94,121 +50,118 @@ class AirlineAgent:
         3. **Collect Booking Details** (After selecting a flight):
            - **Passenger Names**: Full names for EACH passenger (must match the count).
            - **Contact Info**: Email or Phone (if needed for booking).
-        4. **FINAL STEP**: Once you have the Flight choice, Passenger Names, and Email, call the `book_flight` tool to confirm the booking.
+        4. **FINAL STEP**: Once you have the Flight choice (Number 1, 2, etc.), Passenger Names, and Email, call the `book_flight` tool.
+           - Pass the `flight_index` as an integer (e.g., 1 for the first option).
+           - The tool will return a **Booking Link**. Provide this link to the user to complete their purchase.
         
         **Process:**
         1. Ask clarifying questions until you have all Search Details.
         2. Call `search_flights` with the specific parameters (count adults, children, etc. based on ages).
-        3. Present results clearly.
+        3. Present results clearly (numbered 1, 2, 3...).
         4. If the user wants to book, ask for Passenger Names and Email.
-        5. Call `book_flight` with the collected details.
+        5. Call `book_flight` with the Flight Number (index) and details.
         
         Do not make up flight data. Use the tools.
         """)
         self.messages.append(self.system_message)
 
-    async def run_loop(self, user_input: str):
-        """
-        Main async execution loop:
-        1. Connects to MCP Server (src/server.py)
-        2. Discovers tools
-        3. Runs LLM reasoning loop
-        """
-        # Define server parameters (launching src/server.py as subprocess)
+    async def start(self):
+        """Initialize connection to MCP Server."""
+        if self.session:
+             return
+
         server_script = os.path.join(os.path.dirname(__file__), "server.py")
-        
-        # Ensure we run with the same python executable
         server_params = StdioServerParameters(
             command=sys.executable,
             args=[server_script],
-            env=os.environ.copy() # Pass env for API keys
+            env=os.environ.copy()
         )
-
+        
         print(f"Connecting to MCP Server at: {server_script}...")
         
-        # Connect to Server
-        async with stdio_client(server_params) as (read, write):
-            async with ClientSession(read, write) as session:
-                # Initialize session
-                await session.initialize()
-                
-                # List available tools from server
-                mcp_tools_list = await session.list_tools()
-                print(f"Connected. Found tools: {[t.name for t in mcp_tools_list.tools]}")
-                
-                # Convert MCP tools to LangChain tools
-                langchain_tools = []
-                for tool_info in mcp_tools_list.tools:
-                    # Create a closure to capture tool_name for the callback
-                    def create_tool_func(t_name):
-                        async def _tool_wrapper(**kwargs):
-                            # Call the tool via MCP session
-                            result = await session.call_tool(t_name, arguments=kwargs)
-                            # Result content is usually a list of TextContent or ImageContent
-                            # We extract text for the LLM
-                            text_output = []
-                            for content in result.content:
-                                if content.type == "text":
-                                    text_output.append(content.text)
-                            return "\n".join(text_output)
-                        return _tool_wrapper
+        # Enter contexts
+        stdio_transport = await self.exit_stack.enter_async_context(stdio_client(server_params))
+        self.read, self.write = stdio_transport
+        self.session = await self.exit_stack.enter_async_context(ClientSession(self.read, self.write))
+        
+        await self.session.initialize()
+        
+        # Discover tools
+        mcp_tools_list = await self.session.list_tools()
+        print(f"Connected. Found tools: {[t.name for t in mcp_tools_list.tools]}")
+        
+        # Bind tools
+        self.langchain_tools = []
+        for tool_info in mcp_tools_list.tools:
+            async def _create_tool_wrapper(t_name=tool_info.name):
+                 async def _wrapper(**kwargs):
+                     result = await self.session.call_tool(t_name, arguments=kwargs)
+                     text_output = []
+                     for content in result.content:
+                         if content.type == "text":
+                             text_output.append(content.text)
+                     return "\n".join(text_output)
+                 return _wrapper
 
-                    # Define the StructuredTool
-                    lc_tool = StructuredTool.from_function(
-                        func=None, # Async only
-                        coroutine=create_tool_func(tool_info.name),
-                        name=tool_info.name,
-                        description=tool_info.description or "No description",
-                    )
-                    langchain_tools.append(lc_tool)
+            wrapper = await _create_tool_wrapper()
+            
+            lc_tool = StructuredTool.from_function(
+                func=None,
+                coroutine=wrapper,
+                name=tool_info.name,
+                description=tool_info.description or "No description",
+            )
+            self.langchain_tools.append(lc_tool)
+            
+        self.llm_with_tools = self.llm.bind_tools(self.langchain_tools)
 
-                # Bind tools to LLM
-                llm_with_tools = self.llm.bind_tools(langchain_tools)
-                
-                # Add user input
-                self.messages.append(HumanMessage(content=user_input))
-                
-                # Execution Flow
-                final_response = None
-                max_iterations = 5
-                
-                for _ in range(max_iterations):
-                    print("Invoking LLM...")
-                    # Async invoke
-                    response = await llm_with_tools.ainvoke(self.messages)
-                    self.messages.append(response)
-                    
-                    if not response.tool_calls:
-                        final_response = response.content
-                        break
-                    
-                    # Execute Tools
-                    for tool_call in response.tool_calls:
-                        tool_name = tool_call['name']
-                        tool_args = tool_call['args']
-                        tool_id = tool_call['id']
-                        
-                        print(f"Executing tool: {tool_name} with args: {tool_args}")
-                        
-                        # Find the matching LangChain tool to execute its coroutine
-                        selected_tool = next((t for t in langchain_tools if t.name == tool_name), None)
-                        
-                        tool_output = "Error: Tool not found locally"
-                        if selected_tool:
-                            try:
-                                # Execute the async wrapper we defined above
-                                tool_output = await selected_tool.coroutine(**tool_args)
-                            except Exception as e:
-                                tool_output = f"Tool execution failed: {e}"
-                        
-                        # Append result
-                        self.messages.append(ToolMessage(
-                            content=str(tool_output),
-                            tool_call_id=tool_id
-                        ))
+    async def run_loop(self, user_input: str):
+        """Process a single user turn."""
+        if not self.session:
+            await self.start()
+            
+        self.messages.append(HumanMessage(content=user_input))
+        
+        final_response = None
+        max_iterations = 5
+        
+        for _ in range(max_iterations):
+            print("Invoking LLM...")
+            try:
+                response = await self.llm_with_tools.ainvoke(self.messages)
+            except Exception as e:
+                return f"LLM Error: {e}"
 
-                return final_response
+            self.messages.append(response)
+            
+            if not response.tool_calls:
+                final_response = response.content
+                break
+            
+            for tool_call in response.tool_calls:
+                tool_name = tool_call['name']
+                tool_args = tool_call['args']
+                tool_id = tool_call['id']
+                
+                print(f"Executing tool: {tool_name} with args: {tool_args}")
+                
+                selected_tool = next((t for t in self.langchain_tools if t.name == tool_name), None)
+                
+                tool_output = "Error: Tool not found locally"
+                if selected_tool:
+                    try:
+                        tool_output = await selected_tool.coroutine(**tool_args)
+                    except Exception as e:
+                        tool_output = f"Tool execution failed: {e}"
+                
+                self.messages.append(ToolMessage(
+                    content=str(tool_output),
+                    tool_call_id=tool_id
+                ))
 
-    def close(self):
-        """Cleanup if needed."""
-        pass
+        return final_response
+
+    async def close(self):
+        """Cleanup connection."""
+        await self.exit_stack.aclose()
+        self.session = None

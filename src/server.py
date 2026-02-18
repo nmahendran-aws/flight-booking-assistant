@@ -64,12 +64,12 @@ def search_flights(origin: str, destination: str, date_str: str,
     )
 
 @mcp.tool()
-def book_flight(flight_id: str, passenger_names: str, email: str) -> str:
+def book_flight(flight_index: int, passenger_names: str, email: str) -> str:
     """
-    Book a selected flight.
+    Generate a booking link for a selected flight.
     
     Args:
-        flight_id: The ID or description of the flight (e.g., "Flight 1: American Airlines...").
+        flight_index: The number of the flight option (e.g., 1, 2, 3) from the search results.
         passenger_names: Comma-separated full names of all passengers.
         email: Contact email address for the booking.
     """
@@ -82,7 +82,12 @@ def book_flight(flight_id: str, passenger_names: str, email: str) -> str:
     
     names_list = [n.strip() for n in passenger_names.split(",")]
     
-    return flight_tool.book_flight(flight_id, names_list, email)
+    try:
+        return flight_tool.book_flight(flight_index, names_list, email)
+    except Exception as e:
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        return f"Error executing book_flight: {str(e)}"
 
 if __name__ == "__main__":
     # Standard entry point for MCP

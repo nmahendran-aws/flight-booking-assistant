@@ -24,17 +24,17 @@ async def main():
         print(f"Agent: {response1}")
         
         # 2. Book
-        query2 = "Book the first flight for John Doe. My email is john@example.com."
+        query2 = "Book the first flight (option 1) for John Doe. Email is john@example.com."
         print(f"\nUser: {query2}")
         response2 = await agent.run_loop(query2)
         print(f"Agent: {response2}")
         
-        if "Confirmation Code" in response2:
-            print("\nSUCCESS: Booking verified!")
+        if "Booking Link Generated" in response2 or "google.com/travel/flights" in response2:
+            print("\nSUCCESS: Booking Link verified!")
         else:
-            print("\nFAILURE: Did not find confirmation code.")
+            print("\nFAILURE: Did not find Booking Link.")
         
-        agent.close()
+        await agent.close()
         
     except Exception as e:
         print(f"Verification failed: {e}")
